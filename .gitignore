@@ -1,0 +1,5 @@
+@Examples*/**
+Backups/**
+**.txt
+**.ini
+__pycache__/**

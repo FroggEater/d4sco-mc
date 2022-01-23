@@ -1,0 +1,87 @@
+name: GitVersion Manual Versioning
+on:
+  workflow_dispatch:
+jobs:
+  run-gitversion:
+    name: Run GitVersion
+    runs-on: ubuntu-latest
+    outputs:
+      ver: ${{ steps.gv.outputs.semVer }}
+      pre: ${{ steps.gv.outputs.commitsSinceVersionSource }}
+      shortVer: ${{ steps.gv.outputs.majorMinorPatch }}
+      longVer: ${{ steps.gv.outputs.fullSemVer }}
+      branch: ${{ steps.gv.outputs.branchName }}
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Fetch tags and branches history
+        run: git fetch --prune
+      - name: Setup GitVersion
+        uses: gittools/actions/gitversion/setup@v0.9.11
+        with:
+          versionSpec: '5.x'
+      - name: Run GitVersion
+        id: gv
+        uses: gittools/actions/gitversion/execute@v0.9.11
+        with:
+          useConfigFile: true
+          configFilePath: GitVersion.yml
+  run-bump-file-version:
+    name: Update and generate files, commit and tag
+    needs: run-gitversion
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Find and replace version in README
+        uses: jacobtomlinson/gha-find-replace@v2
+        with:
+          find: '([0-9]+[.][0-9]+[.][0-9]+){1}'
+          replace: ${{ needs.run-gitversion.outputs.ver }}
+          regex: true
+          include: '**README.md'
+      - name: Find and replace version in code
+        uses: jacobtomlinson/gha-find-replace@v2
+        with:
+          find: '([0-9]+[.][0-9]+[.][0-9]+){1}'
+          replace: ${{ needs.run-gitversion.outputs.ver }}
+          regex: true
+          include: '**.fx?'
+      - name: Commit and push changes to current branch
+        run: |
+          git config --global user.name "FroggEater"
+          git config --global user.email "bastien.froment@outlook.fr"
+          git commit --allow-empty -am "ci: automatic version update"
+          git push
+      - name: Tag changes on current branch
+        run: |
+          git config --global user.name "FroggEater"
+          git config --global user.email "bastien.froment@outlook.fr"
+          git tag -f -a v${{ needs.run-gitversion.outputs.ver }} -m "ci: automatic tag update"
+          git push --force --tags
+  run-changelog-builder:
+    name: Run Full Changelog Builder
+    needs: run-bump-file-version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Build changelog
+        id: cl
+        uses: mikepenz/release-changelog-builder-action@v2.7.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          configuration: 'GitChangelog.json'
+          outputFile: 'CHANGELOG.md'
+          fromTag: 'v0.1.0-rc29'
+      - name: Commit and push changes to current branch
+        run: |
+          git config --global user.name "FroggEater"
+          git config --global user.email "bastien.froment@outlook.fr"
+          git commit --allow-empty -am "ci: automatic changelog update"
+          git pull --rebase
+          git push
